@@ -14,11 +14,12 @@ import (
 )
 
 type Files struct {
-	Access    *slog.Logger
-	Runtime   *slog.Logger
-	Framework *frameworkLogger
-	access    *fileWriter
-	runtime   *fileWriter
+	InstanceID string
+	Access     *slog.Logger
+	Runtime    *slog.Logger
+	Framework  *frameworkLogger
+	access     *fileWriter
+	runtime    *fileWriter
 }
 
 // Open owns two rolling files. Use one directory per running process/instance.
@@ -43,7 +44,7 @@ func Open(cfg Options, level slog.Level) (*Files, error) {
 		instance = uuid.NewString()
 	}
 	attrs := []any{"service", cfg.Service, "instance", instance}
-	files := &Files{access: access, runtime: runtime}
+	files := &Files{access: access, runtime: runtime, InstanceID: instance}
 	files.Access = New(access, slog.LevelInfo).With(attrs...).With("log_type", "access")
 	files.Runtime = New(runtime, level).With(attrs...).With("log_type", "runtime")
 	files.Framework = newFrameworkLogger(runtime, level, append(attrs, "log_type", "runtime", "component", "hertz"))

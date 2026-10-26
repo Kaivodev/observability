@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type Info struct {
@@ -38,5 +39,21 @@ func From(ctx context.Context) Info {
 		return Info{}
 	}
 	info, _ := ctx.Value(contextKey{}).(Info)
+	if span := trace.SpanContextFromContext(ctx); span.IsValid() {
+		info.TraceID = span.TraceID().String()
+	}
 	return info
+}
+
+// Ensure keeps an existing correlation ID and uses the active span's trace ID.
+func Ensure(ctx context.Context) context.Context {
+	info := From(ctx)
+	if !info.Valid() {
+		fresh := New()
+		if span := trace.SpanContextFromContext(ctx); span.IsValid() {
+			fresh.TraceID = span.TraceID().String()
+		}
+		info = fresh
+	}
+	return With(ctx, info)
 }

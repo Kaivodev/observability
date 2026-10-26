@@ -8,6 +8,7 @@ import (
 
 	"github.com/aipay-dev/observability/redact"
 	"github.com/aipay-dev/observability/requestmeta"
+	"go.opentelemetry.io/otel/trace"
 )
 
 func New(out io.Writer, level slog.Level) *slog.Logger {
@@ -52,6 +53,18 @@ type contextHandler struct{ slog.Handler }
 
 func (h contextHandler) Handle(ctx context.Context, record slog.Record) error {
 	metadata := requestmeta.From(ctx)
+	span := trace.SpanContextFromContext(ctx)
+	if span.IsValid() {
+		clean := slog.NewRecord(record.Time, record.Level, record.Message, record.PC)
+		record.Attrs(func(a slog.Attr) bool {
+			if a.Key != "trace_id" && a.Key != "span_id" && a.Key != "trace_sampled" {
+				clean.AddAttrs(a)
+			}
+			return true
+		})
+		clean.AddAttrs(slog.String("trace_id", span.TraceID().String()), slog.String("span_id", span.SpanID().String()), slog.Bool("trace_sampled", span.IsSampled()))
+		record = clean
+	}
 	if metadata.Valid() {
 		hasRequest, hasTrace := false, false
 		record.Attrs(func(a slog.Attr) bool {
@@ -70,7 +83,13 @@ func (h contextHandler) Handle(ctx context.Context, record slog.Record) error {
 }
 
 func (h contextHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	return contextHandler{h.Handler.WithAttrs(attrs)}
+	filtered := make([]slog.Attr, 0, len(attrs))
+	for _, a := range attrs {
+		if a.Key != "trace_id" && a.Key != "span_id" && a.Key != "trace_sampled" {
+			filtered = append(filtered, a)
+		}
+	}
+	return contextHandler{h.Handler.WithAttrs(filtered)}
 }
 func (h contextHandler) WithGroup(name string) slog.Handler {
 	return contextHandler{h.Handler.WithGroup(name)}
