@@ -1,6 +1,6 @@
 # AI Pay Observability
 
-供 backend、IAM、账务、结算和对账服务共用的日志、OpenTelemetry 追踪与任务观测库；各服务独立运行、落盘和管理审计数据库。
+供 backend、IAM、支付、账务、结算和对账服务共用的日志、OpenTelemetry 追踪与任务观测库；各服务独立运行、落盘和管理审计数据库。
 
 | 包 | 能力 |
 | --- | --- |
@@ -12,6 +12,8 @@
 | `tracing` | 显式 SDK、OTLP/gRPC 导出、W3C carrier 与有界刷新 |
 | `hertzobs` / `httpobs` | 公网 HTTP 根 span、协议结果归一化、安全出站 HTTP |
 | `asynqobs` | 入队与逐次执行 span、重试/超时/panic 日志和安全错误 |
+
+指标导出尚未实现。按 docs 仓库的[监控指标与告警](https://github.com/aipay-dev/docs/blob/main/design/operations.md#监控指标与告警)设计，后续以 OpenTelemetry 指标经 OTLP 推送到 Collector，再进入 Prometheus 与 Grafana；资金域只主动推送，监控不作为资金控制的依据。
 
 ## 服务初始化
 
