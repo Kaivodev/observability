@@ -1,4 +1,4 @@
-# AI Pay Observability
+# Kaivo Observability
 
 供 backend、IAM、支付、账务、结算和对账服务共用的日志、OpenTelemetry 追踪与任务观测库；各服务独立运行、落盘和管理审计数据库。
 
@@ -13,7 +13,7 @@
 | `hertzobs` / `httpobs` | 公网 HTTP 根 span、协议结果归一化、安全出站 HTTP |
 | `asynqobs` | 入队与逐次执行 span、重试/超时/panic 日志和安全错误 |
 
-指标导出尚未实现。按 docs 仓库的[监控指标与告警](https://github.com/aipay-dev/docs/blob/main/design/operations.md#监控指标与告警)设计，后续以 OpenTelemetry 指标经 OTLP 推送到 Collector，再进入 Prometheus 与 Grafana；资金域只主动推送，监控不作为资金控制的依据。
+指标导出尚未实现。按 docs 仓库的[监控指标与告警](https://github.com/Kaivodev/docs/blob/main/design/operations.md#监控指标与告警)设计，后续以 OpenTelemetry 指标经 OTLP 推送到 Collector，再进入 Prometheus 与 Grafana；资金域只主动推送，监控不作为资金控制的依据。
 
 ## 服务初始化
 
@@ -89,3 +89,7 @@ producer span 表示入队结果；worker 每次尝试有独立 `span_id` / `exe
 直接使用 Asynq 时同时设置 `Handler=observer.Middleware(handler)`、`ErrorHandler=observer`、`Logger=asynqobs.NewFrameworkLogger(runtimeLog)` 和 `BaseContext: func() context.Context { return observer.BaseContext(workerContext) }`；后者使框架自身的超时/租约错误也能关联到执行 span。框架日志只保留固定事件分类，不转储任意格式化参数。执行超时会结束观测记录；Go 无法强制终止忽略 context 的 handler，业务仍必须响应取消、使用数据库幂等并防止失效执行写入。连接和进程生命周期优先使用 servicekit/queue。
 
 本库 race 测试验证真实 OTLP 接收、采样/资源、队列溢出、不可用采集器、有界刷新、上下文信任、HTTP 传播及任务异常。完整 PostgreSQL → Redis/Asynq → gRPC/HTTP → Collector/Jaeger 验证位于 servicekit；这些测试不代表支付或身份业务已经实现。
+
+## 名称与兼容性
+
+项目品牌统一为 **Kaivo**，GitHub 组织为 **Kaivodev**。已发布 Go module、协议/签名标识及现有配置键暂时保留原值，属于兼容接口；改名不修改历史账本或协议语义。范围与迁移规则见[命名约定](https://github.com/Kaivodev/docs/blob/main/design/naming.md)。
