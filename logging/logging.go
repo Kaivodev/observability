@@ -6,8 +6,8 @@ import (
 	"io"
 	"log/slog"
 
-	"github.com/aipay-dev/observability/redact"
-	"github.com/aipay-dev/observability/requestmeta"
+	"github.com/Kaivodev/observability/redact"
+	"github.com/Kaivodev/observability/requestmeta"
 	"go.opentelemetry.io/otel/trace"
 )
 

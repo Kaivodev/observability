@@ -22,7 +22,7 @@ type Outcome func(*app.RequestContext) Result
 // Middleware must run outside request-ID, access-log and recovery middleware.
 // The outcome callback lets protocol-specific HTTP-200 failures mark the span.
 func Middleware(provider trace.TracerProvider, outcome Outcome) app.HandlerFunc {
-	tracer := provider.Tracer("github.com/aipay-dev/observability/hertzobs")
+	tracer := provider.Tracer("github.com/Kaivodev/observability/hertzobs")
 	return func(ctx context.Context, c *app.RequestContext) {
 		ctx, span := tracer.Start(ctx, "HTTP request", trace.WithNewRoot(), trace.WithSpanKind(trace.SpanKindServer))
 		defer span.End()

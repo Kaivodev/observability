@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aipay-dev/observability/logging"
-	"github.com/aipay-dev/observability/requestmeta"
+	"github.com/Kaivodev/observability/logging"
+	"github.com/Kaivodev/observability/requestmeta"
 	"go.opentelemetry.io/otel/trace"
 	collector "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	"google.golang.org/grpc"

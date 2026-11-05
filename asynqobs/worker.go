@@ -9,8 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/aipay-dev/observability/requestmeta"
-	"github.com/aipay-dev/observability/tracing"
+	"github.com/Kaivodev/observability/requestmeta"
+	"github.com/Kaivodev/observability/tracing"
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 	"go.opentelemetry.io/otel/attribute"
@@ -45,7 +45,7 @@ func NewWorker(provider trace.TracerProvider, access, runtime *slog.Logger, maxP
 	if provider == nil || access == nil || runtime == nil || maxPayload < 1 || maxPayload > 16<<20 {
 		return nil, errors.New("invalid Asynq worker observation options")
 	}
-	return &Worker{tracer: provider.Tracer("github.com/aipay-dev/observability/asynqobs"), access: access, runtime: runtime, maxPayload: maxPayload}, nil
+	return &Worker{tracer: provider.Tracer("github.com/Kaivodev/observability/asynqobs"), access: access, runtime: runtime, maxPayload: maxPayload}, nil
 }
 
 func (w *Worker) Middleware(next asynq.Handler) asynq.Handler {

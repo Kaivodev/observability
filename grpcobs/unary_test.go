@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aipay-dev/observability/logging"
-	"github.com/aipay-dev/observability/requestmeta"
+	"github.com/Kaivodev/observability/logging"
+	"github.com/Kaivodev/observability/requestmeta"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"

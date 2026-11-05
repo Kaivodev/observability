@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/aipay-dev/observability/requestmeta"
+	"github.com/Kaivodev/observability/requestmeta"
 	"github.com/hibiken/asynq"
 	"go.opentelemetry.io/otel/trace"
 )

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/aipay-dev/observability/requestmeta"
+	"github.com/Kaivodev/observability/requestmeta"
 	"github.com/google/uuid"
 )
 

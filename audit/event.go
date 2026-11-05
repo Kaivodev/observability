@@ -8,8 +8,8 @@ import (
 	"regexp"
 	"unicode/utf8"
 
-	"github.com/aipay-dev/observability/redact"
-	"github.com/aipay-dev/observability/requestmeta"
+	"github.com/Kaivodev/observability/redact"
+	"github.com/Kaivodev/observability/requestmeta"
 	"github.com/google/uuid"
 )
 

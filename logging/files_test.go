@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aipay-dev/observability/requestmeta"
+	"github.com/Kaivodev/observability/requestmeta"
 )
 
 func testLoggingConfig(t *testing.T) Options {

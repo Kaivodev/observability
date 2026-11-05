@@ -56,7 +56,7 @@ grpc.WithChainUnaryInterceptor(grpcobs.UnaryClient())
 
 ## 安装与验证
 
-本库保持私有。调用方使用已发布标签依赖，独立构建设置 `GOPRIVATE=github.com/aipay-dev/*`，并通过自己的 GitHub/SSH 身份读取仓库；不要提交绝对路径 replace。工作区开发可将本仓库加入 `go.work`，交付前用 `GOWORK=off` 验证真实版本依赖。
+本库保持私有。调用方使用已发布标签依赖，独立构建设置 `GOPRIVATE=github.com/Kaivodev/*`，并通过自己的 GitHub/SSH 身份读取仓库；不要提交绝对路径 replace。工作区开发可将本仓库加入 `go.work`，交付前用 `GOWORK=off` 验证真实版本依赖。
 
 CI 的 `AIPAY_MODULES_TOKEN` 只需本仓库 Contents 读取权限，通过临时 Git credential helper 使用，不能写入仓库或构建参数。该 secret 需要在消费本库的仓库单独配置，文档同步 token 保持独立。
 
@@ -92,4 +92,4 @@ producer span 表示入队结果；worker 每次尝试有独立 `span_id` / `exe
 
 ## 名称与兼容性
 
-项目品牌统一为 **Kaivo**，GitHub 组织为 **Kaivodev**。已发布 Go module、协议/签名标识及现有配置键暂时保留原值，属于兼容接口；改名不修改历史账本或协议语义。范围与迁移规则见[命名约定](https://github.com/Kaivodev/docs/blob/main/design/naming.md)。
+项目品牌统一为 **Kaivo**，GitHub 组织为 **Kaivodev**。Go module 已迁到 `github.com/Kaivodev/observability`，`GOPRIVATE` 使用同样大小写的 `github.com/Kaivodev/*`；协议/签名标识及现有配置键暂时保留原值，属于兼容接口；改名不修改历史账本或协议语义。范围与迁移规则见[命名约定](https://github.com/Kaivodev/docs/blob/main/design/naming.md)。

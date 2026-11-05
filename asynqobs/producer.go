@@ -9,8 +9,8 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/aipay-dev/observability/requestmeta"
-	"github.com/aipay-dev/observability/tracing"
+	"github.com/Kaivodev/observability/requestmeta"
+	"github.com/Kaivodev/observability/tracing"
 	"github.com/hibiken/asynq"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -49,7 +49,7 @@ func NewProducer(client Enqueuer, provider trace.TracerProvider, access *slog.Lo
 	if client == nil || provider == nil || access == nil || maxPayload < 1 || maxPayload > 16<<20 {
 		return nil, errors.New("invalid Asynq producer options")
 	}
-	return &Producer{client: client, tracer: provider.Tracer("github.com/aipay-dev/observability/asynqobs"), access: access, maxPayload: maxPayload}, nil
+	return &Producer{client: client, tracer: provider.Tracer("github.com/Kaivodev/observability/asynqobs"), access: access, maxPayload: maxPayload}, nil
 }
 
 func (p *Producer) Enqueue(ctx context.Context, message Message, options ...asynq.Option) (info *asynq.TaskInfo, err error) {

@@ -1,4 +1,4 @@
-module github.com/aipay-dev/observability
+module github.com/Kaivodev/observability
 
 go 1.27.0
 

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/aipay-dev/observability/logging"
-	"github.com/aipay-dev/observability/requestmeta"
+	"github.com/Kaivodev/observability/logging"
+	"github.com/Kaivodev/observability/requestmeta"
 	"github.com/hibiken/asynq"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
