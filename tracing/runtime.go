@@ -2,19 +2,14 @@ package tracing
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"errors"
 	"log/slog"
-	"net/url"
-	"os"
 	"sync"
 	"sync/atomic"
 
-	"go.opentelemetry.io/otel/attribute"
+	"github.com/Kaivodev/observability/internal/otlp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/propagation"
-	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc/credentials"
@@ -39,10 +34,10 @@ func Open(ctx context.Context, options Options, log *slog.Logger) (*Runtime, err
 	if err := options.Config.Validate(); err != nil {
 		return nil, err
 	}
-	if !validResource(options.Service) || !validResource(options.Instance) || log == nil {
+	if !otlp.ValidResourceValue(options.Service) || !otlp.ValidResourceValue(options.Instance) || log == nil {
 		return nil, errors.New("tracing requires service, instance and runtime logger")
 	}
-	resource := resource.NewSchemaless(attribute.String("service.name", options.Service), attribute.String("service.version", options.Version), attribute.String("service.instance.id", options.Instance), attribute.String("deployment.environment.name", options.Config.Environment))
+	resource := otlp.Resource(options.Service, options.Version, options.Instance, options.Config.Environment)
 	rt := &Runtime{config: options.Config, log: log}
 	providerOptions := []sdktrace.TracerProviderOption{sdktrace.WithResource(resource), sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.TraceIDRatioBased(options.Config.SampleRatio)))}
 	if options.Config.Endpoint != "" {
@@ -85,42 +80,14 @@ func (r *Runtime) Shutdown(parent context.Context) error {
 	return r.closeErr
 }
 
-func validResource(value string) bool {
-	if value == "" || len(value) > 128 {
-		return false
-	}
-	for _, r := range value {
-		if r < ' ' || r == 127 {
-			return false
-		}
-	}
-	return true
-}
-
 func exportOptions(c Config) ([]otlptracegrpc.Option, error) {
-	u, _ := url.Parse(c.Endpoint)
+	tlsConfig, err := c.transport().TLSConfig("trace")
+	if err != nil {
+		return nil, err
+	}
 	opts := []otlptracegrpc.Option{otlptracegrpc.WithEndpointURL(c.Endpoint), otlptracegrpc.WithTimeout(c.ExportTimeout)}
-	if u.Scheme == "http" {
+	if tlsConfig == nil {
 		return append(opts, otlptracegrpc.WithInsecure()), nil
-	}
-	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS13, ServerName: u.Hostname()}
-	if c.CAFile != "" {
-		data, err := os.ReadFile(c.CAFile)
-		if err != nil {
-			return nil, errors.New("read trace CA bundle failed")
-		}
-		roots := x509.NewCertPool()
-		if !roots.AppendCertsFromPEM(data) {
-			return nil, errors.New("trace CA bundle contains no certificates")
-		}
-		tlsConfig.RootCAs = roots
-	}
-	if c.CertFile != "" {
-		pair, err := tls.LoadX509KeyPair(c.CertFile, c.KeyFile)
-		if err != nil {
-			return nil, errors.New("load trace client certificate failed")
-		}
-		tlsConfig.Certificates = []tls.Certificate{pair}
 	}
 	return append(opts, otlptracegrpc.WithTLSCredentials(credentials.NewTLS(tlsConfig))), nil
 }

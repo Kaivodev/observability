@@ -10,7 +10,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/common/hlog"
 )
 
-// frameworkLogger keeps Hertz lifecycle diagnostics in the structured runtime file.
+// frameworkLogger keeps Hertz lifecycle diagnostics in the structured runtime log.
 // Configure the global Hertz logger before starting server goroutines.
 type frameworkLogger struct {
 	current atomic.Pointer[slog.Logger]

@@ -12,6 +12,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+const scope = "github.com/Kaivodev/observability/hertzobs"
+
 type Result struct {
 	Failed   bool
 	Code     int64
@@ -22,21 +24,12 @@ type Outcome func(*app.RequestContext) Result
 // Middleware must run outside request-ID, access-log and recovery middleware.
 // The outcome callback lets protocol-specific HTTP-200 failures mark the span.
 func Middleware(provider trace.TracerProvider, outcome Outcome) app.HandlerFunc {
-	tracer := provider.Tracer("github.com/Kaivodev/observability/hertzobs")
+	tracer := provider.Tracer(scope)
 	return func(ctx context.Context, c *app.RequestContext) {
 		ctx, span := tracer.Start(ctx, "HTTP request", trace.WithNewRoot(), trace.WithSpanKind(trace.SpanKindServer))
 		defer span.End()
 		c.Next(ctx)
-		route := c.FullPath()
-		if route == "" {
-			route = "unmatched"
-		}
-		method := string(c.Method())
-		switch method {
-		case "GET", "HEAD", "POST", "PUT", "DELETE", "CONNECT", "OPTIONS", "TRACE", "PATCH":
-		default:
-			method = "_OTHER"
-		}
+		method, route := methodAndRoute(c)
 		span.SetName(method + " " + route)
 		span.SetAttributes(attribute.String("http.request.method", method), attribute.String("http.route", route), attribute.Int("http.response.status_code", c.Response.StatusCode()))
 		result := Result{Failed: c.Response.StatusCode() >= 400, Code: int64(c.Response.StatusCode()), Protocol: "http"}
@@ -48,4 +41,18 @@ func Middleware(provider trace.TracerProvider, outcome Outcome) app.HandlerFunc 
 			span.SetStatus(codes.Error, "request_failed")
 		}
 	}
+}
+
+func methodAndRoute(c *app.RequestContext) (method, route string) {
+	route = c.FullPath()
+	if route == "" {
+		route = "unmatched"
+	}
+	method = string(c.Method())
+	switch method {
+	case "GET", "HEAD", "POST", "PUT", "DELETE", "CONNECT", "OPTIONS", "TRACE", "PATCH":
+	default:
+		method = "_OTHER"
+	}
+	return method, route
 }

@@ -9,8 +9,7 @@ import (
 	"strings"
 )
 
-// Options describes one process's two log files. Service is supplied by the
-// composition root, never by request data. Each instance needs its own directory.
+// Options configures structured process logs. Service comes from the composition root.
 type Options struct {
 	Service    string
 	Dir        string
@@ -18,6 +17,7 @@ type Options struct {
 	MaxSizeMB  int
 	MaxBackups int
 	MaxAgeDays int
+	Output     string // "stdout" or "file". Empty retains file output for direct callers.
 }
 
 var serviceName = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
@@ -27,7 +27,12 @@ func (o Options) Validate() error {
 	if !serviceName.MatchString(o.Service) {
 		problems = append(problems, errors.New("invalid log service name"))
 	}
-	if strings.TrimSpace(o.Dir) == "" {
+	switch o.Output {
+	case "", "file", "stdout":
+	default:
+		problems = append(problems, errors.New("AIPAY_LOG_OUTPUT must be file or stdout"))
+	}
+	if o.Output != "stdout" && strings.TrimSpace(o.Dir) == "" {
 		problems = append(problems, errors.New("AIPAY_LOG_DIR cannot be blank"))
 	}
 	if len(o.InstanceID) > 128 || strings.ContainsAny(o.InstanceID, "\r\n\x00") {
@@ -68,7 +73,12 @@ func Load(service string, get func(string) string) (Options, slog.Level, error) 
 		}
 		return v
 	}
+	defaultOutput := "file"
+	if get("KUBERNETES_SERVICE_HOST") != "" {
+		defaultOutput = "stdout"
+	}
 	o := Options{
+		Output:  value("LOG_OUTPUT", defaultOutput),
 		Service: service, Dir: value("LOG_DIR", "./logs"), InstanceID: get("AIPAY_INSTANCE_ID"),
 		MaxSizeMB: integer("LOG_MAX_SIZE_MB", "50"), MaxBackups: integer("LOG_MAX_BACKUPS", "5"),
 		MaxAgeDays: integer("LOG_MAX_AGE_DAYS", "14"),

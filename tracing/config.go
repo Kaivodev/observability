@@ -6,12 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"net"
-	"net/url"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Kaivodev/observability/internal/otlp"
 )
 
 type Config struct {
@@ -77,35 +77,11 @@ func (c Config) Validate() error {
 	if c.Environment == "" || len(c.Environment) > 64 || strings.ContainsAny(c.Environment, "\r\n\x00") {
 		return errors.New("invalid trace deployment environment")
 	}
-	if (c.CertFile == "") != (c.KeyFile == "") {
-		return errors.New("trace client certificate and key must be configured together")
-	}
-	if c.Endpoint == "" {
-		if c.CAFile != "" || c.CertFile != "" {
-			return errors.New("trace TLS files require an export endpoint")
-		}
-		return nil
-	}
-	u, err := url.Parse(c.Endpoint)
-	if err != nil || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") || (u.Scheme != "http" && u.Scheme != "https") {
-		return errors.New("trace endpoint must be an http(s) authority without credentials, path or query")
-	}
-	if port := u.Port(); port != "" {
-		n, err := strconv.Atoi(port)
-		if err != nil || n < 1 || n > 65535 {
-			return errors.New("invalid trace endpoint port")
-		}
-	}
-	if u.Scheme == "http" {
-		ip := net.ParseIP(u.Hostname())
-		if u.Hostname() != "localhost" && (ip == nil || !ip.IsLoopback()) && !c.AllowInsecure {
-			return errors.New("non-loopback plaintext trace export requires AIPAY_TRACE_ALLOW_INSECURE=true")
-		}
-		if c.CAFile != "" || c.CertFile != "" {
-			return errors.New("trace TLS files require an https endpoint")
-		}
-	}
-	return nil
+	return c.transport().Validate("trace")
+}
+
+func (c Config) transport() otlp.Transport {
+	return otlp.Transport{Endpoint: c.Endpoint, AllowInsecure: c.AllowInsecure, CAFile: c.CAFile, CertFile: c.CertFile, KeyFile: c.KeyFile}
 }
 
 func DefaultConfig() Config            { c, _ := Load(func(string) string { return "" }); return c }

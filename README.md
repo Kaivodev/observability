@@ -1,19 +1,22 @@
 # Kaivo Observability
 
-供 backend、IAM、支付、账务、结算和对账服务共用的日志、OpenTelemetry 追踪与任务观测库；各服务独立运行、落盘和管理审计数据库。
+供 backend、IAM、支付、账务、结算和对账服务共用的日志、OpenTelemetry 追踪、指标与任务观测库。审计数据库由各服务管理。
 
 | 包 | 能力 |
 | --- | --- |
-| `logging` | `slog` JSON、访问/运行文件分离、轮转、Hertz 框架适配、统一配置 |
+| `logging` | `slog` JSON、stdout、访问/运行文件分离与轮转、Hertz 框架适配、统一配置 |
 | `requestmeta` | Go context 中的 `request_id` / `trace_id`，不代表身份或权限 |
 | `redact` | 结构化字段递归脱敏，不修改调用方数据 |
 | `audit` | 审计事件契约、校验与脱敏，返回供服务存储适配器使用的记录 |
 | `grpcobs` | gRPC 访问日志、可信身份接点、关联传播和 panic 恢复 |
 | `tracing` | 显式 SDK、OTLP/gRPC 导出、W3C carrier 与有界刷新 |
-| `hertzobs` / `httpobs` | 公网 HTTP 根 span、协议结果归一化、安全出站 HTTP |
+| `metrics` | 显式 MeterProvider、累积 OTLP/gRPC 指标、属性过滤与基数限制 |
+| `hertzobs` / `httpobs` | 公网 HTTP 根 span、服务端耗时直方图、协议结果归一化、安全出站 HTTP |
 | `asynqobs` | 入队与逐次执行 span、重试/超时/panic 日志和安全错误 |
 
-指标导出尚未实现。按 docs 仓库的[监控指标与告警](https://github.com/Kaivodev/docs/blob/main/design/operations.md#监控指标与告警)设计，后续以 OpenTelemetry 指标经 OTLP 推送到 Collector，再进入 Prometheus 与 Grafana；资金域只主动推送，监控不作为资金控制的依据。
+## v0.4.0（待发布）
+
+新增指标 provider 和 Hertz HTTP 指标中间件。升级时注意，K8s 内 `logging.Load` 的默认输出由文件改为 stdout。依赖文件采集的部署请显式设置 `AIPAY_LOG_OUTPUT=file`。直接构造 `logging.Options` 时，`Output` 的零值仍使用文件。原先按位置构造 `logging.Options` 的调用方需补上新字段，或改用字段名。
 
 ## 服务初始化
 
@@ -28,9 +31,50 @@ logs.Runtime.Info("service starting")
 // Hertz 使用 hlog.SetLogger(logs.Framework)，在服务启动前设置。
 ```
 
-统一读取 `AIPAY_LOG_DIR`（`./logs`）、`AIPAY_LOG_LEVEL`（`info`）、`AIPAY_INSTANCE_ID`（空则生成）、`AIPAY_LOG_MAX_SIZE_MB`（50）、`AIPAY_LOG_MAX_BACKUPS`（5）、`AIPAY_LOG_MAX_AGE_DAYS`（14）。`service` 由程序固定传入，不能取自请求；每个实例使用独立可写目录。
+## 日志输出方式
 
-访问日志始终记录；运行日志按等级过滤。正常服务日志写入文件，目录无法打开则启动失败，运行中写入失败向 stderr 报告且不回显内容。时间统一为 UTC；备份清理在打开/轮转后异步执行，活动文件不按年龄删除。新目录/文件为 0700/0600，部署负责已有路径权限和持久卷。
+`AIPAY_LOG_OUTPUT` 接受 `file` 或 `stdout`。未设置时，`KUBERNETES_SERVICE_HOST` 非空选 stdout，否则选 file。本机和 Compose 栈如需文件，应显式设置 `AIPAY_LOG_OUTPUT=file`。
+
+- `stdout` 下，访问、运行和 Hertz 框架日志共用加锁的标准输出，每条 JSON 单次写入。框架日志归入 `log_type=runtime`。连续写入失败只向 stderr 报告一次，恢复后重新计数。本库校验轮转参数，跳过文件和目录操作。K8s 中由 kubelet 负责轮转。
+- `file` 下，每个进程使用独立可写目录。`AIPAY_LOG_DIR` 默认 `./logs`，访问与运行日志分别落入 `access.log` 和 `runtime.log`。轮转键 `AIPAY_LOG_MAX_SIZE_MB`、`AIPAY_LOG_MAX_BACKUPS`、`AIPAY_LOG_MAX_AGE_DAYS` 默认分别为 50、5、14。新目录和文件权限为 0700 和 0600，备份在打开或轮转后异步清理。
+
+两种模式共用 UTC 时间、`service`、`instance`、`log_type`、追踪关联和结构化脱敏。`AIPAY_LOG_LEVEL` 默认 `info`，仅过滤运行和框架日志。`AIPAY_INSTANCE_ID` 为空时自动生成。调用方应使用稳定的服务名和安全的日志消息，审计仍写属主数据库。
+
+## 指标配置
+
+`metrics.Load(os.Getenv)` 读取下表。空端点会创建可用的 SDK MeterProvider，调用方可以照常注册仪表并记录。此时没有 reader，也不会连接 Collector。有端点时使用 PeriodicReader 推送累积值，全程显式传递 provider。
+
+| `AIPAY_METRICS_` 后缀 | 默认值 | 约束 |
+| --- | --- | --- |
+| `ENDPOINT` | 空 | 与追踪共用校验，支持 `http(s)://host:port`，禁止凭据、业务路径和查询串 |
+| `ALLOW_INSECURE` | `false` | 非回环明文端点须显式允许 |
+| `CA_FILE` / `CERT_FILE` / `KEY_FILE` | 空 | HTTPS 使用 TLS 1.3，可指定 CA，客户端证书与私钥成对配置 |
+| `INTERVAL` | `15s` | 1s 到 5m，含两端 |
+| `EXPORT_TIMEOUT` | `5s` | 正值，严格小于导出间隔 |
+| `SHUTDOWN_TIMEOUT` | `3s` | 正值，同时受调用方剩余预算限制 |
+| `ENVIRONMENT` | `development` | 部署环境，最多 64 字节 |
+| `CARDINALITY_LIMIT` | `2000` | 每个仪表 100 到 100000 个属性组合，含溢出序列 |
+
+仪表只使用设计列出的标签，取值来自固定枚举、路由模板或部署配置。SDK 视图将键转为小写，并将点和连字符转为下划线后匹配禁用项，涵盖业务与关联 ID、交易号、幂等键、网络地址、联系方式、URL、查询和错误原文。服务可用 `metrics.Forbidden(key)` 测试键名。为防止过滤掉的属性随 exemplar 导出，此 provider 关闭 exemplar。超限测量归入 `otel.metric.overflow=true`，Prometheus 标签名为 `otel_metric_overflow`。[完整禁用键规则](metrics/attributes.go)
+
+Collector 离线时，业务照常启动并记录指标。失败批次计入 `ExportFailures()`，每段连续故障仅记一次安全警告，恢复时记一条。失败批次不重试，下一次导出仍是累积值。
+
+### Hertz HTTP 指标
+
+```go
+cfg, err := metrics.Load(os.Getenv)
+if err != nil { return err }
+meters, err := metrics.Open(ctx, metrics.Options{
+    Config: cfg, Service: service, Version: version, Instance: logs.InstanceID,
+}, logs.Runtime)
+if err != nil { return err }
+// 注册到服务的停机流程，在请求排空后、日志关闭前调用 meters.Shutdown(drainCtx)。
+observeHTTP, err := hertzobs.Metrics(meters.Provider(), "public_api")
+if err != nil { return err }
+h.Use(observeHTTP) // 注册在恢复中间件和路由之前。
+```
+
+`kaivo.http.server.duration` 以秒记录，使用 5 ms 至 10 s 的 11 个桶边界。标签为 `listener`、`http_route`、`http_method` 和字符串形式的 `http_status_code`。未匹配的路由记为 `unmatched`，非标准方法记为 `_OTHER`。每个监听器的名称由调用方固定配置。
 
 ## gRPC 接入
 
@@ -56,11 +100,9 @@ grpc.WithChainUnaryInterceptor(grpcobs.UnaryClient())
 
 ## 安装与验证
 
-本库保持私有。调用方使用已发布标签依赖，独立构建设置 `GOPRIVATE=github.com/Kaivodev/*`，并通过自己的 GitHub/SSH 身份读取仓库；不要提交绝对路径 replace。工作区开发可将本仓库加入 `go.work`，交付前用 `GOWORK=off` 验证真实版本依赖。
+调用方使用本库已发布的标签。工作区开发可将本仓库加入 `go.work`，交付前用 `GOWORK=off` 验证发布版本依赖，避免提交本地 replace。
 
-CI 的 `AIPAY_MODULES_TOKEN` 只需本仓库 Contents 读取权限，通过临时 Git credential helper 使用，不能写入仓库或构建参数。该 secret 需要在消费本库的仓库单独配置，文档同步 token 保持独立。
-
-运行 `make fmt check`。测试覆盖文件轮转/并发/写入错误、脱敏、审计校验、两台内存 gRPC 服务间的关联传递和拒绝/panic 路径；不代表真实业务服务、mTLS 部署或生产日志采集已接通。
+运行 `make fmt check` 执行格式化、vet 和 race 测试。库内使用进程内 OTLP/gRPC 接收端验证导出、资源、属性过滤、基数溢出及故障恢复，并验证日志输出和 Hertz 指标。真实服务到 Collector、Prometheus 和 Loki 的链路由 servicekit、服务与部署仓库联验。
 
 ## 追踪配置与兼容性
 

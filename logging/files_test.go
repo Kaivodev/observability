@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -13,66 +14,97 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Kaivodev/observability/redact"
 	"github.com/Kaivodev/observability/requestmeta"
+	"go.opentelemetry.io/otel/trace"
 )
 
 func testLoggingConfig(t *testing.T) Options {
 	return Options{Service: "ledger", Dir: t.TempDir(), InstanceID: "test-instance", MaxSizeMB: 1, MaxBackups: 2, MaxAgeDays: 1}
 }
 
-func TestFileSeparationCorrelationAndRedaction(t *testing.T) {
-	cfg := testLoggingConfig(t)
-	files, err := Open(cfg, slog.LevelError)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer files.Close()
-	metadata := requestmeta.New()
-	ctx := requestmeta.With(context.Background(), metadata)
-	details := map[string]any{"safe": "kept", "nested": map[string]any{"access_token": "do-not-record-token"}}
-	files.Access.InfoContext(ctx, "http request", "route", "/api.php", "status", 200)
-	files.Runtime.Info("filtered")
-	files.Runtime.ErrorContext(ctx, "operation failed", "password", "do-not-record-password", "details", details, slog.Group("credentials", slog.String("value", "do-not-record-group")))
-	files.Framework.CtxErrorf(ctx, "framework diagnostic")
-	if err := files.Close(); err != nil {
-		t.Fatal(err)
-	}
-	access, err := os.ReadFile(filepath.Join(cfg.Dir, "access.log"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	runtime, err := os.ReadFile(filepath.Join(cfg.Dir, "runtime.log"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if bytes.Contains(runtime, []byte("http request")) || bytes.Contains(access, []byte("operation failed")) || bytes.Contains(runtime, []byte("filtered")) {
-		t.Fatal("logs mixed or runtime threshold ignored")
-	}
-	if bytes.Contains(runtime, []byte("do-not-record")) {
-		t.Fatalf("sensitive structured value leaked: %s", runtime)
-	}
-	if details["nested"].(map[string]any)["access_token"] != "do-not-record-token" {
-		t.Fatal("redaction modified caller data")
-	}
-	for _, data := range [][]byte{access, runtime} {
-		for _, line := range bytes.Split(bytes.TrimSpace(data), []byte("\n")) {
-			var record map[string]any
-			if err := json.Unmarshal(line, &record); err != nil {
+func TestOutputFieldsCorrelationAndRedaction(t *testing.T) {
+	for _, mode := range []string{"file", "stdout"} {
+		t.Run(mode, func(t *testing.T) {
+			cfg := testLoggingConfig(t)
+			cfg.Output = mode
+			cfg.Dir = filepath.Join(cfg.Dir, "logs")
+			var stdout bytes.Buffer
+			files, err := openWithOutput(cfg, slog.LevelError, &stdout, io.Discard)
+			if err != nil {
 				t.Fatal(err)
 			}
-			if record["request_id"] != metadata.RequestID || record["trace_id"] != metadata.TraceID || record["service"] != "ledger" || record["instance"] != "test-instance" {
-				t.Fatalf("missing correlation/source: %v", record)
+			defer files.Close()
+			metadata := requestmeta.New()
+			span := trace.NewSpanContext(trace.SpanContextConfig{
+				TraceID: trace.TraceID{1}, SpanID: trace.SpanID{2}, TraceFlags: trace.FlagsSampled,
+			})
+			ctx := trace.ContextWithSpanContext(requestmeta.With(context.Background(), metadata), span)
+			details := map[string]any{"nested": map[string]any{"access_token": "do-not-record-token"}}
+			files.Access.InfoContext(ctx, "http request", "trace_id", "stale")
+			files.Runtime.Info("filtered")
+			files.Runtime.ErrorContext(ctx, "operation failed", "password", "do-not-record-password", "details", details,
+				slog.Group("credentials", slog.String("value", "do-not-record-group")))
+			files.Framework.CtxErrorf(ctx, "framework diagnostic")
+			if err := files.Close(); err != nil {
+				t.Fatal(err)
 			}
-			if _, ok := record["level"].(string); !ok {
-				t.Fatalf("level is not a string: %v", record)
+			data := stdout.Bytes()
+			if mode == "file" {
+				read := func(name string) []byte {
+					b, err := os.ReadFile(filepath.Join(cfg.Dir, name+".log"))
+					if err != nil {
+						t.Fatal(err)
+					}
+					return b
+				}
+				access, runtime := read("access"), read("runtime")
+				if len(data) != 0 || bytes.Count(access, []byte("\n")) != 1 || !bytes.Contains(access, []byte("http request")) {
+					t.Fatal("access and runtime outputs mixed")
+				}
+				data = append(access, runtime...)
+			} else if _, err := os.Stat(cfg.Dir); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("stdout touched the log directory: %v", err)
 			}
-			if !strings.HasSuffix(record["time"].(string), "Z") {
-				t.Fatal("log time must be UTC")
+			if bytes.Contains(data, []byte("do-not-record")) || bytes.Contains(data, []byte("stale")) {
+				t.Fatal("sensitive values or stale correlation leaked")
 			}
-		}
-	}
-	if _, err := files.runtime.Write([]byte("after close")); !errors.Is(err, os.ErrClosed) {
-		t.Fatalf("closed logger reopened: %v", err)
+			if details["nested"].(map[string]any)["access_token"] != "do-not-record-token" {
+				t.Fatal("redaction modified caller data")
+			}
+			want := []struct{ msg, kind, level string }{
+				{"http request", "access", "INFO"}, {"operation failed", "runtime", "ERROR"}, {"framework diagnostic", "runtime", "ERROR"},
+			}
+			lines := bytes.Split(bytes.TrimSpace(data), []byte("\n"))
+			if len(lines) != len(want) {
+				t.Fatalf("got %d records", len(lines))
+			}
+			for i, line := range lines {
+				var r map[string]any
+				if err := json.Unmarshal(line, &r); err != nil {
+					t.Fatal(err)
+				}
+				if r["msg"] != want[i].msg || r["log_type"] != want[i].kind || r["level"] != want[i].level ||
+					r["service"] != cfg.Service || r["instance"] != cfg.InstanceID || r["request_id"] != metadata.RequestID ||
+					r["trace_id"] != span.TraceID().String() || r["span_id"] != span.SpanID().String() || r["trace_sampled"] != true {
+					t.Fatalf("unexpected log fields: %v", r)
+				}
+				if want[i].msg == "operation failed" && r["password"] != redact.Mask {
+					t.Fatal("missing redaction marker")
+				}
+				if want[i].msg == "framework diagnostic" && r["component"] != "hertz" {
+					t.Fatal("missing framework component")
+				}
+				if !strings.HasSuffix(r["time"].(string), "Z") {
+					t.Fatal("timestamp is not UTC")
+				}
+			}
+			for _, log := range []*slog.Logger{files.Access, files.Runtime} {
+				if err := log.Handler().Handle(ctx, slog.NewRecord(time.Now(), slog.LevelError, "after close", 0)); !errors.Is(err, os.ErrClosed) {
+					t.Fatalf("write after close: %v", err)
+				}
+			}
+		})
 	}
 }
 
@@ -158,5 +190,61 @@ func TestFileErrorsAreVisibleWithoutEchoingPayload(t *testing.T) {
 	cfg.Dir = blocked
 	if _, err := Open(cfg, slog.LevelInfo); err == nil {
 		t.Fatal("invalid log directory must fail startup")
+	}
+}
+
+// Each call captures exactly one underlying Write. Deliberately unsynchronized:
+// all three loggers must be serialized by the shared stdout writer.
+type stdoutCapture struct {
+	writes []string
+	fail   bool
+	closed bool
+}
+
+func (w *stdoutCapture) Write(p []byte) (int, error) {
+	if w.fail {
+		return 0, errors.New("sensitive writer detail")
+	}
+	w.writes = append(w.writes, string(p))
+	return len(p), nil
+}
+func (w *stdoutCapture) Close() error { w.closed = true; return nil }
+
+func TestSharedStdoutConcurrencyAndFailureEpisodes(t *testing.T) {
+	cfg := testLoggingConfig(t)
+	cfg.Output, cfg.Dir = "stdout", ""
+	var out stdoutCapture
+	var stderr bytes.Buffer
+	logs, err := openWithOutput(cfg, slog.LevelInfo, &out, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var group sync.WaitGroup
+	for i := range 100 {
+		group.Go(func() { logs.Access.Info("access", "index", i) })
+		group.Go(func() { logs.Runtime.Info("runtime", "index", i) })
+		group.Go(func() { logs.Framework.Infof("framework %d", i) })
+	}
+	group.Wait()
+	if len(out.writes) != 300 {
+		t.Fatalf("got %d writes for 300 records", len(out.writes))
+	}
+	for _, data := range out.writes {
+		if strings.Count(data, "\n") != 1 || !strings.HasSuffix(data, "\n") || !json.Valid([]byte(data)) {
+			t.Fatal("underlying write did not contain exactly one JSON line")
+		}
+	}
+	out.fail = true
+	logs.Access.Info("sensitive record")
+	logs.Framework.Errorf("sensitive record")
+	out.fail = false
+	logs.Runtime.Info("recovered")
+	out.fail = true
+	logs.Runtime.Error("sensitive record")
+	if got := stderr.String(); got != "stdout logging failed\nstdout logging failed\n" {
+		t.Fatalf("unexpected stderr: %q", got)
+	}
+	if err := logs.Close(); err != nil || out.closed {
+		t.Fatalf("Close must leave stdout open: closed=%v, err=%v", out.closed, err)
 	}
 }

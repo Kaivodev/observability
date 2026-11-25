@@ -30,3 +30,35 @@ func TestLoadConfig(t *testing.T) {
 		t.Fatal("accepted missing service")
 	}
 }
+
+func TestOutputSelection(t *testing.T) {
+	for _, test := range []struct{ host, output, want string }{
+		{"", "", "file"}, {"kube", "", "stdout"},
+		{"kube", "file", "file"}, {"", "stdout", "stdout"},
+		{"kube", "STDOUT", ""}, {"", " ", ""},
+	} {
+		values := map[string]string{"AIPAY_LOG_OUTPUT": test.output, "KUBERNETES_SERVICE_HOST": test.host}
+		cfg, _, err := Load("ledger", func(k string) string { return values[k] })
+		if test.want == "" {
+			if err == nil {
+				t.Error("accepted invalid output", test.output)
+			}
+		} else if err != nil || cfg.Output != test.want {
+			t.Errorf("host %q, output %q: got %q, %v", test.host, test.output, cfg.Output, err)
+		}
+	}
+	values := map[string]string{"AIPAY_LOG_OUTPUT": "stdout", "AIPAY_LOG_DIR": " "}
+	get := func(k string) string { return values[k] }
+	if _, _, err := Load("ledger", get); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"AIPAY_LOG_MAX_SIZE_MB", "AIPAY_LOG_MAX_BACKUPS", "AIPAY_LOG_MAX_AGE_DAYS"} {
+		for _, v := range []string{"invalid", "0"} {
+			values[key] = v
+			if _, _, err := Load("ledger", get); err == nil {
+				t.Errorf("stdout accepted invalid %s", key)
+			}
+		}
+		delete(values, key)
+	}
+}
